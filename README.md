@@ -687,3 +687,19 @@ Jalankan server dan client:
 ./client
 ```
 ### Output
+#### 1. Fuse
+![2.1](assets/soal_2/fuse.png)<br>
+#### 2. Menambahkan file dan isi teks ke dalam fuse_mount
+![2.2](assets/soal_2/text-fuse.png)<br>
+#### 3. Mencoba membaca file enkripsi dan dekripsi
+![2.3.1](assets/soal_2/cat-enc-dec.png)<br>
+![2.3.2](assets/soal_2/cat-notes.png)<br>
+#### 4. Cek docker image dan kontainer pada background
+![2.4.1](assets/soal_2/docker-image.png)<br>
+![2.4.2](assets/soal_2/docker-ps.png)<br>
+#### 5. Menjalankan server dan client
+![2.5.1](assets/soal_2/running-server.png)<br>
+![2.5.2](assets/soal_2/running-client1.png)<br>
+![2.5.3](assets/soal_2/running-client2.png)<br>
+### Kendala
+Tidak ada kendala.
