@@ -703,3 +703,195 @@ Jalankan server dan client:
 ![2.5.3](assets/soal_2/running-client2.png)<br>
 ### Kendala
 Tidak ada kendala.
+
+### Soal 3
+Soal 3 meminta kita untuk membuat 4 file yakni `Dockerfile`, `docker-compose.yml`, `smb.conf`, dan `entrypoint.sh`. Selain itu, kita perlu membuat directory `data` dengan isi directory `ebooks`, `papers`, `sourcecode`, dan `docs`. Kemudian kita juga perlu membuat directory `logs` dengan isi directory `libraryit.logs`.  
+Isi dari `Dockerfile` adalah sebagai berikut:
+```Dockerfile
+FROM ubuntu:22.04
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y samba && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /libraryit/ebooks /libraryit/papers /libraryit/sourcecode /libraryit/docs
+
+COPY smb.conf /etc/samba/smb.conf
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+RUN mkdir -p /var/log/samba
+
+EXPOSE 445
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+```
+Dockerfile ini membuat container berbasis `ubuntu:22.04` yang berfungsi sebagai server Samba. Perintah `apt-get update` dan `apt-get install -y samba` menginstal layanan Samba, lalu cache package dihapus agar ukuran image lebih kecil. Direktori `/libraryit/ebooks`, `/papers`, `/sourcecode`, dan `/docs` dibuat sebagai shared folder yang akan diakses melalui Samba.  
+Kemudian isi dari `docker-compose.yml` adalah sebagai berikut:
+```yml
+version: '3.8'
+
+services:
+  libraryit-server:
+    build: .
+    container_name: libraryit-server
+    ports:
+      - "1445:445"
+    volumes:
+      - ./data/ebooks:/libraryit/ebooks
+      - ./data/papers:/libraryit/papers
+      - ./data/sourcecode:/libraryit/sourcecode
+      - ./data/docs:/libraryit/docs
+      - ./logs/libraryit.log:/var/log/samba/libraryit.log   # mount file spesifik
+    restart: unless-stopped
+
+  libraryit-logger:
+    image: alpine:latest
+    container_name: libraryit-logger
+    depends_on:
+      - libraryit-server
+    volumes:
+      - ./logs/libraryit.log:/var/log/samba/libraryit.log:ro
+    command: tail -n +0 -F /var/log/samba/libraryit.log
+    restart: unless-stopped
+```
+File `docker-compose.yml` ini digunakan untuk menjalankan dua container sekaligus. Service `libraryit-server` akan membangun image dari `Dockerfile` di direktori saat ini, memberi nama container `libraryit-server`, memetakan port host 1445 ke port container 445 agar Samba bisa diakses dari luar, serta melakukan bind mount beberapa folder lokal (`ebooks`, `papers`, `sourcecode`, `docs`) ke direktori share di dalam container.  
+Selanjutnya isi dari `smb.conf` adalah sebagai berikut:
+```conf
+[global]
+   workgroup = WORKGROUP
+   server string = LibraryIT Server
+   security = user
+   map to guest = never
+   guest ok = no
+   hide unreadable = yes
+   load printers = no
+   printing = bsd
+   printcap name = /dev/null
+   disable spoolss = yes
+   
+   # Matikan log Samba standar
+   enable core files = no
+   log file = /dev/null
+   syslog = 0
+   log level = 0
+   
+   # Audit hanya menulis ke /tmp agar tidak muncul di volume
+   vfs objects = full_audit
+   full_audit:prefix = %u|%I|%S
+   full_audit:success = connect disconnect open opendir write mkdir rmdir
+   full_audit:failure = connect disconnect open opendir write mkdir rmdir
+   full_audit:log file = /tmp/audit_raw.log
+
+[ebooks]
+   path = /libraryit/ebooks
+   read only = no
+   valid users = @readonly, @staff
+   write list = @staff
+   force group = staff
+   create mask = 0660
+   directory mask = 0770
+
+[papers]
+   path = /libraryit/papers
+   read only = no
+   valid users = @readonly, @staff
+   write list = @staff
+   force group = staff
+   create mask = 0660
+   directory mask = 0770
+
+[sourcecode]
+   path = /libraryit/sourcecode
+   read only = yes
+   valid users = @staff
+   force group = staff
+
+[docs]
+   path = /libraryit/docs
+   read only = yes
+   valid users = @readonly, @staff
+   write list = librarian
+   force group = staff
+   create mask = 0660
+   directory mask = 0770
+```
+File `smb.conf` ini merupakan konfigurasi Samba untuk membuat server file sharing LibraryIT dengan kontrol akses berbasis user dan grup. Pada bagian `[global]`, server diatur menggunakan workgroup `WORKGROUP`, autentikasi user aktif, akses guest ditolak, file yang tidak punya izin disembunyikan, fitur printer dimatikan, dan logging standar Samba dinonaktifkan agar tidak memenuhi volume log. Sebagai gantinya, modul `full_audit` digunakan untuk mencatat aktivitas penting seperti koneksi, membuka file, menulis, membuat, dan menghapus direktori ke `/tmp/audit_raw.log`. Empat share disediakan: `[ebooks]` dan [papers] bisa dibaca user grup `readonly` dan `staff`, tetapi hanya staff yang boleh menulis. `[sourcecode]` hanya bisa diakses oleh grup `staff` dalam mode read-only, sedangkan `[docs]` bisa dibaca oleh `readonly` dan `staff`, namun hanya user librarian yang diberi hak tulis. Opsi seperti `force group`, `create mask`, dan `directory mask` memastikan file baru selalu memiliki grup serta permission yang konsisten sesuai kebijakan server.  
+Terakhir, file `entrypoint.sh` adalah sebagai berikut:
+```sh
+#!/bin/bash
+set -e
+
+echo "[*] Membuat group dan user..."
+
+# Hapus grup staff bawaan Ubuntu (GID 50) jika ada
+if getent group staff | grep -q '^staff:x:50:'; then
+    groupdel staff
+fi
+
+# Buat grup staff dan readonly
+getent group staff >/dev/null || groupadd -g 1001 staff
+getent group readonly >/dev/null || groupadd -g 1002 readonly
+
+# Buat user (tanpa primary group staff/readonly dulu)
+id member &>/dev/null || useradd -m -s /bin/false member
+id contributor &>/dev/null || useradd -m -s /bin/false contributor
+id librarian &>/dev/null || useradd -m -s /bin/false librarian
+
+# Tambahkan user ke grup yang sesuai (anggota tambahan)
+usermod -aG readonly member
+usermod -aG staff contributor
+usermod -aG staff librarian
+
+# Set password Samba
+(echo "member123"; echo "member123") | smbpasswd -a -s member
+(echo "contrib456"; echo "contrib456") | smbpasswd -a -s contributor
+(echo "lib789"; echo "lib789") | smbpasswd -a -s librarian
+
+smbpasswd -e member
+smbpasswd -e contributor
+smbpasswd -e librarian
+
+echo "[*] Mengatur permission direktori koleksi..."
+
+mkdir -p /libraryit/ebooks /libraryit/papers /libraryit/sourcecode /libraryit/docs
+
+chown root:staff /libraryit/ebooks /libraryit/papers
+chmod 775 /libraryit/ebooks /libraryit/papers
+
+chown root:staff /libraryit/sourcecode
+chmod 750 /libraryit/sourcecode
+
+chown root:staff /libraryit/docs
+chmod 775 /libraryit/docs          # Penting: 775 agar librarian bisa tulis
+
+echo "[*] Memulai transformasi log..."
+
+mkdir -p /var/log/samba
+chmod 755 /var/log/samba
+touch /var/log/samba/libraryit.log
+chmod 644 /var/log/samba/libraryit.log
+
+# Parsing log standar Samba (log.smbd) ke format yang diminta
+tail -F /var/log/samba/log.smbd | while read -r line; do
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    if echo "$line" | grep -q "connect to service"; then
+        user=$(echo "$line" | sed -n 's/.*as user \([^ ]*\).*/\1/p')
+        share=$(echo "$line" | sed -n 's/.*connect to service \([^ ]*\).*/\1/p')
+        echo "[$timestamp] [INFO] [$user] [CONNECT] [$share]" >> /var/log/samba/libraryit.log
+    elif echo "$line" | grep -q "NT_STATUS_ACCESS_DENIED"; then
+        user=$(echo "$line" | grep -oP 'user=\K[^ ]*')
+        file=$(echo "$line" | grep -oP 'file=\K[^ ]*')
+        [ -z "$file" ] && file="unknown"
+        echo "[$timestamp] [WARNING] [$user] [DENIED] [$file]" >> /var/log/samba/libraryit.log
+    elif echo "$line" | grep -qE "opened file.*write|create_file|write_file|open.*O_WRONLY"; then
+        user=$(echo "$line" | grep -oP 'user=\K[^ ]*')
+        file=$(echo "$line" | grep -oP 'file=\K[^ ]*')
+        echo "[$timestamp] [INFO] [$user] [WRITE] [$file]" >> /var/log/samba/libraryit.log
+    fi
+done &
+
+echo "[*] Memulai Samba..."
+exec smbd --foreground --no-process-group
+```
+Script `entrypoint.sh` ini berfungsi menginisialisasi container sebelum server Samba dijalankan. Script dimulai dengan `set -e` agar langsung berhenti jika terjadi error, lalu membuat grup `staff` dan `readonly` serta menghapus grup bawaan Ubuntu jika bentrok. Setelah itu dibuat tiga user (member, contributor, librarian), masing-masing dimasukkan ke grup sesuai hak akses, kemudian password Samba diatur dan akun diaktifkan. Selanjutnya, skrip membuat direktori koleksi (`ebooks`, `papers`, `sourcecode`, `docs`) dan mengatur ownership serta permission agar sesuai aturan akses share. Setelah struktur file siap, script menyiapkan file log `/var/log/samba/libraryit.log`, lalu menjalankan proses `tail -F` untuk memantau log mentah Samba (`log.smbd`) dan mengubahnya ke format log yang lebih rapi, seperti mencatat event koneksi, akses ditolak, dan aktivitas penulisan file. Terakhir, perintah `exec smbd --foreground --no-process-group` menjalankan server Samba di foreground agar container tetap aktif dan melayani koneksi client.
