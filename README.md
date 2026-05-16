@@ -895,3 +895,17 @@ echo "[*] Memulai Samba..."
 exec smbd --foreground --no-process-group
 ```
 Script `entrypoint.sh` ini berfungsi menginisialisasi container sebelum server Samba dijalankan. Script dimulai dengan `set -e` agar langsung berhenti jika terjadi error, lalu membuat grup `staff` dan `readonly` serta menghapus grup bawaan Ubuntu jika bentrok. Setelah itu dibuat tiga user (member, contributor, librarian), masing-masing dimasukkan ke grup sesuai hak akses, kemudian password Samba diatur dan akun diaktifkan. Selanjutnya, skrip membuat direktori koleksi (`ebooks`, `papers`, `sourcecode`, `docs`) dan mengatur ownership serta permission agar sesuai aturan akses share. Setelah struktur file siap, script menyiapkan file log `/var/log/samba/libraryit.log`, lalu menjalankan proses `tail -F` untuk memantau log mentah Samba (`log.smbd`) dan mengubahnya ke format log yang lebih rapi, seperti mencatat event koneksi, akses ditolak, dan aktivitas penulisan file. Terakhir, perintah `exec smbd --foreground --no-process-group` menjalankan server Samba di foreground agar container tetap aktif dan melayani koneksi client.
+### Output
+#### 1. Docker untuk melihat anggota perpustakaan dan directory libraryit
+![3.1](assets/soal_3/docker.png)<br>
+#### 2. Samba untuk hak akses anggota perpustakaan
+![3.2.1](assets/soal_3/smb.png)<br>
+![3.2.2](assets/soal_3/smb2.png)<br>
+#### 3. Melihat directory data dan sourcecode
+![3.3.1](assets/soal_3/directory-data.png)<br>
+![3.3.2](assets/soal_3/sourcecode.png)<br>
+#### 4. Logging
+![3.4](assets/soal_3/logger.png)<br>
+### Kendala
+1. Akses anggota perpustakaan masih terdapat bug
+2. Logger tidak bisa jalan.
